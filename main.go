@@ -1,30 +1,20 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/nick/mac-cleanup-explorer/internal/tui"
 )
 
-type model struct{}
-
-func (m model) Init() tea.Cmd { return nil }
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if msg.String() == "q" {
-			return m, tea.Quit
-		}
-	}
-	return m, nil
-}
-func (m model) View() string {
-	return "Mac Cleanup Explorer — press q to quit\n"
-}
-
 func main() {
-	p := tea.NewProgram(model{}, tea.WithAltScreen())
+	scanPath := flag.String("path", "/", "Root path to scan")
+	flag.Parse()
+
+	app := tui.NewApp(*scanPath)
+	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
