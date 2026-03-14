@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/nick/mac-cleanup-explorer/internal/analyzer"
+	"github.com/nick/mac-cleanup-explorer/internal/executor"
 	"github.com/nick/mac-cleanup-explorer/internal/scanner"
 	"github.com/nick/mac-cleanup-explorer/internal/theme"
 )
@@ -205,10 +206,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case itemDeletedMsg:
 		if msg.success {
 			actionStr := "Deleted"
+			cmdStr := fmt.Sprintf("rm -rf %s", msg.path)
 			if msg.action == "trash" {
 				actionStr = "Moved to Trash"
+				cmdStr = fmt.Sprintf("trash %s", msg.path)
 			}
 			flash := fmt.Sprintf("%s: %s (freed %s)", actionStr, msg.path, theme.FormatSize(msg.freed))
+
+			// Log the action to history (non-blocking)
+			logCmd := logActionCmd(cmdStr, "success", msg.freed)
 
 			// Remove from reports model
 			a.reportsModel.removeReportItem(msg.path)
@@ -220,11 +226,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.currentView = viewReports
 				a.reportsModel.flashMsg = flash
 				a.reportsModel.flashTimer = 30
-				return a, flashTickCmd()
+				return a, tea.Batch(flashTickCmd(), logCmd)
 			}
 			a.reportsModel.flashMsg = flash
 			a.reportsModel.flashTimer = 30
-			return a, flashTickCmd()
+			return a, tea.Batch(flashTickCmd(), logCmd)
 		}
 		// Error case
 		errFlash := fmt.Sprintf("Error: %s", msg.err)
@@ -241,7 +247,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.reportsModel.flashTimer = 30
 		// Re-sync the reports
 		a.reports = a.reportsModel.reports
-		return a, flashTickCmd()
+
+		// Log bulk delete action to history (non-blocking)
+		logCmd := logActionCmd(
+			fmt.Sprintf("bulk delete (%d items)", msg.deleted+msg.failed),
+			fmt.Sprintf("%d deleted, %d failed", msg.deleted, msg.failed),
+			msg.freed,
+		)
+		return a, tea.Batch(flashTickCmd(), logCmd)
 
 	case scanCompleteMsg:
 		a.scanResult = msg.result
@@ -360,4 +373,13 @@ func overlayCenter(width, height int, background, overlay string) string {
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(lipgloss.Color(theme.BgColor)),
 	)
+}
+
+// logActionCmd returns a tea.Cmd that logs an action to the history file
+// without blocking the UI.
+func logActionCmd(command, result string, freedBytes int64) tea.Cmd {
+	return func() tea.Msg {
+		_ = executor.LogAction(executor.DefaultLogPath(), command, result, freedBytes)
+		return nil
+	}
 }

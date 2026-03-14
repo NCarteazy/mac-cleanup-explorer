@@ -202,14 +202,22 @@ func (m executorModel) executeSelected() (executorModel, tea.Cmd) {
 	idx := m.cursor
 	executor.ExecuteCommand(cmd)
 
-	return m, func() tea.Msg {
-		return commandExecutedMsg{index: idx}
+	// Log the executed command to history
+	result := "success"
+	if cmd.ExitCode != 0 {
+		result = fmt.Sprintf("failed (exit %d)", cmd.ExitCode)
 	}
+	logCmd := logActionCmd(cmd.Raw, result, 0)
+
+	return m, tea.Batch(logCmd, func() tea.Msg {
+		return commandExecutedMsg{index: idx}
+	})
 }
 
 // executeAll executes all validated commands.
 func (m executorModel) executeAll() (executorModel, tea.Cmd) {
 	executed := 0
+	var logCmds []tea.Cmd
 	for i := range m.commands {
 		cmd := &m.commands[i]
 		if !cmd.Validated || cmd.Error != "" {
@@ -222,6 +230,12 @@ func (m executorModel) executeAll() (executorModel, tea.Cmd) {
 			cmd.ExitCode = 0
 		} else {
 			executor.ExecuteCommand(cmd)
+			// Log each executed command to history
+			result := "success"
+			if cmd.ExitCode != 0 {
+				result = fmt.Sprintf("failed (exit %d)", cmd.ExitCode)
+			}
+			logCmds = append(logCmds, logActionCmd(cmd.Raw, result, 0))
 		}
 		executed++
 	}
@@ -232,7 +246,8 @@ func (m executorModel) executeAll() (executorModel, tea.Cmd) {
 		m.flashMsg = fmt.Sprintf("Executed %d command(s)", executed)
 	}
 	m.flashTimer = 20
-	return m, flashTickCmd()
+	logCmds = append(logCmds, flashTickCmd())
+	return m, tea.Batch(logCmds...)
 }
 
 // View renders the executor view.
