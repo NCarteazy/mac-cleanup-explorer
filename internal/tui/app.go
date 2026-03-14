@@ -44,6 +44,7 @@ type App struct {
 	// Sub-models
 	scanModel      scanModel
 	dashboardModel dashboardModel
+	reportsModel   reportsModel
 }
 
 // NewApp creates a new App model configured to scan the given path.
@@ -80,10 +81,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		// Forward resize to dashboard if active
+		// Forward resize to active sub-model
 		if a.currentView == viewDashboard {
 			a.dashboardModel.width = msg.Width
 			a.dashboardModel.height = msg.Height
+		}
+		if a.currentView == viewReports {
+			var cmd tea.Cmd
+			a.reportsModel, cmd = a.reportsModel.Update(msg)
+			return a, cmd
 		}
 
 	case tea.KeyMsg:
@@ -99,8 +105,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if a.currentView == viewDashboard {
-				// Transition to reports view (placeholder for now)
 				a.currentView = viewReports
+				a.reportsModel = newReportsModel(a.reports, a.reportList, a.scanResult, a.width, a.height)
 				return a, nil
 			}
 		case "e":
@@ -123,6 +129,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reportsReadyMsg:
 		a.reports = msg.reports
 		a.dashboardModel.reports = msg.reports
+
+	case navigateBackMsg:
+		if a.currentView == viewReports {
+			a.currentView = viewDashboard
+			return a, nil
+		}
+
+	case navigateToDetailMsg:
+		// Placeholder: could transition to viewDetail in the future
+		_ = msg.item
 	}
 
 	// Route to current view's update
@@ -134,6 +150,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewDashboard:
 		var cmd tea.Cmd
 		a.dashboardModel, cmd = a.dashboardModel.Update(msg)
+		return a, cmd
+	case viewReports:
+		var cmd tea.Cmd
+		a.reportsModel, cmd = a.reportsModel.Update(msg)
 		return a, cmd
 	}
 
@@ -147,7 +167,7 @@ func (a *App) View() string {
 	case viewDashboard:
 		return a.dashboardModel.View()
 	case viewReports:
-		return "Reports view (coming soon)...\n\nPress q to quit"
+		return a.reportsModel.View()
 	case viewExport:
 		return "Export view (coming soon)...\n\nPress q to quit"
 	default:
