@@ -42,8 +42,8 @@ type App struct {
 	reportList []analyzer.Report
 
 	// Sub-models
-	scanModel scanModel
-	// (dashboard, reports, etc. added in later tasks)
+	scanModel      scanModel
+	dashboardModel dashboardModel
 }
 
 // NewApp creates a new App model configured to scan the given path.
@@ -80,6 +80,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		// Forward resize to dashboard if active
+		if a.currentView == viewDashboard {
+			a.dashboardModel.width = msg.Width
+			a.dashboardModel.height = msg.Height
+		}
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -89,15 +94,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.currentView == viewScanning {
 				return a, tea.Quit
 			}
-			// Other views: q goes back or quits depending on view
 			if a.currentView == viewDashboard {
 				return a, tea.Quit
+			}
+		case "enter":
+			if a.currentView == viewDashboard {
+				// Transition to reports view (placeholder for now)
+				a.currentView = viewReports
+				return a, nil
+			}
+		case "e":
+			if a.currentView == viewDashboard {
+				// Transition to export view (placeholder for now)
+				a.currentView = viewExport
+				return a, nil
 			}
 		}
 
 	case scanCompleteMsg:
 		a.scanResult = msg.result
 		a.currentView = viewDashboard
+		a.dashboardModel = newDashboardModel(a.scanResult, a.width, a.height)
 		return a, func() tea.Msg {
 			results := analyzer.GenerateAll(a.scanResult)
 			return reportsReadyMsg{reports: results}
@@ -105,6 +122,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reportsReadyMsg:
 		a.reports = msg.reports
+		a.dashboardModel.reports = msg.reports
 	}
 
 	// Route to current view's update
@@ -112,6 +130,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewScanning:
 		model, cmd := a.scanModel.Update(msg)
 		a.scanModel = model.(scanModel)
+		return a, cmd
+	case viewDashboard:
+		var cmd tea.Cmd
+		a.dashboardModel, cmd = a.dashboardModel.Update(msg)
 		return a, cmd
 	}
 
@@ -123,7 +145,11 @@ func (a *App) View() string {
 	case viewScanning:
 		return a.scanModel.View()
 	case viewDashboard:
-		return "Dashboard (coming in Task 7)...\n\nPress q to quit"
+		return a.dashboardModel.View()
+	case viewReports:
+		return "Reports view (coming soon)...\n\nPress q to quit"
+	case viewExport:
+		return "Export view (coming soon)...\n\nPress q to quit"
 	default:
 		return "Loading..."
 	}
