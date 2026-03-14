@@ -62,6 +62,14 @@ func (m detailModel) Update(msg tea.Msg) (detailModel, tea.Cmd) {
 			}
 			m.flashTimer = 15
 			return m, flashTickCmd()
+		case "d":
+			return m, func() tea.Msg {
+				return deleteItemMsg{path: m.item.Path, size: m.item.Size}
+			}
+		case "m":
+			return m, func() tea.Msg {
+				return trashItemMsg{path: m.item.Path, size: m.item.Size}
+			}
 		}
 	}
 
@@ -226,6 +234,7 @@ func (m detailModel) renderStatusBar() string {
 		keyStyle.Render("m") + " " + descStyle.Render("Move to Trash"),
 		keyStyle.Render("c") + " " + descStyle.Render("Copy Path"),
 		keyStyle.Render("esc") + " " + descStyle.Render("Back"),
+		keyStyle.Render("?") + " " + descStyle.Render("Help"),
 	}
 
 	bar := theme.StatusBarStyle.Copy().

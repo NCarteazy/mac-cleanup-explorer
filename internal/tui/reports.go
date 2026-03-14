@@ -43,6 +43,13 @@ type reportsModel struct {
 	navStack    []*scanner.FileNode
 	currentNode *scanner.FileNode
 
+	// Selection state for bulk operations
+	selected map[int]bool // set of selected row indices in current table
+
+	// Flash message
+	flashMsg   string
+	flashTimer int
+
 	width, height int
 }
 
@@ -312,6 +319,14 @@ func (m reportsModel) Update(msg tea.Msg) (reportsModel, tea.Cmd) {
 		m.table = m.buildTable(m.sidebarCursor)
 		return m, nil
 
+	case flashTickMsg:
+		m.flashTimer--
+		if m.flashTimer <= 0 {
+			m.flashMsg = ""
+			return m, nil
+		}
+		return m, flashTickCmd()
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "tab":
@@ -345,6 +360,7 @@ func (m reportsModel) Update(msg tea.Msg) (reportsModel, tea.Cmd) {
 				// Select report from sidebar -> update table
 				m.currentNode = nil
 				m.navStack = nil
+				m.selected = nil
 				m.table = m.buildTable(m.sidebarCursor)
 				m.activePane = 1
 				return m, nil
@@ -360,6 +376,76 @@ func (m reportsModel) Update(msg tea.Msg) (reportsModel, tea.Cmd) {
 			if rowIdx >= 0 && rowIdx < len(items) {
 				item := items[rowIdx]
 				return m, func() tea.Msg { return navigateToDetailMsg{item: item} }
+			}
+			return m, nil
+
+		case " ":
+			// Toggle selection on current row in table pane
+			if m.activePane == 1 {
+				rowIdx := m.table.SelectedRow()
+				if rowIdx >= 0 && rowIdx < len(m.table.rows) {
+					if m.selected == nil {
+						m.selected = make(map[int]bool)
+					}
+					if m.selected[rowIdx] {
+						delete(m.selected, rowIdx)
+					} else {
+						m.selected[rowIdx] = true
+					}
+				}
+			}
+			return m, nil
+
+		case "d":
+			// Delete selected item in table pane
+			if m.activePane == 1 {
+				reportName := m.reportNameForIndex(m.sidebarCursor)
+				items := m.reports[reportName]
+				rowIdx := m.table.SelectedRow()
+				if rowIdx >= 0 && rowIdx < len(items) {
+					item := items[rowIdx]
+					return m, func() tea.Msg {
+						return deleteItemMsg{path: item.Path, size: item.Size}
+					}
+				}
+			}
+			return m, nil
+
+		case "m":
+			// Move to trash selected item in table pane
+			if m.activePane == 1 {
+				reportName := m.reportNameForIndex(m.sidebarCursor)
+				items := m.reports[reportName]
+				rowIdx := m.table.SelectedRow()
+				if rowIdx >= 0 && rowIdx < len(items) {
+					item := items[rowIdx]
+					return m, func() tea.Msg {
+						return trashItemMsg{path: item.Path, size: item.Size}
+					}
+				}
+			}
+			return m, nil
+
+		case "D":
+			// Bulk delete all selected items
+			if m.activePane == 1 && len(m.selected) > 0 {
+				reportName := m.reportNameForIndex(m.sidebarCursor)
+				items := m.reports[reportName]
+				var paths []string
+				var sizes []int64
+				var total int64
+				for idx := range m.selected {
+					if idx >= 0 && idx < len(items) {
+						paths = append(paths, items[idx].Path)
+						sizes = append(sizes, items[idx].Size)
+						total += items[idx].Size
+					}
+				}
+				if len(paths) > 0 {
+					return m, func() tea.Msg {
+						return bulkDeleteMsg{paths: paths, sizes: sizes, total: total}
+					}
+				}
 			}
 			return m, nil
 
@@ -392,6 +478,45 @@ func (m reportsModel) Update(msg tea.Msg) (reportsModel, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// removeReportItem removes an item by path from a report and rebuilds the view.
+func (m *reportsModel) removeReportItem(path string) {
+	reportName := m.reportNameForIndex(m.sidebarCursor)
+	items := m.reports[reportName]
+	for i, item := range items {
+		if item.Path == path {
+			m.reports[reportName] = append(items[:i], items[i+1:]...)
+			break
+		}
+	}
+	// Rebuild sidebar counts
+	m.sidebarItems = m.buildSidebarItems()
+	// Rebuild table
+	m.selected = nil
+	m.table = m.buildTable(m.sidebarCursor)
+}
+
+// removeReportItems removes multiple items by path from all reports and rebuilds the view.
+func (m *reportsModel) removeReportItems(paths []string) {
+	pathSet := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		pathSet[p] = true
+	}
+	// Remove from all reports
+	for name, items := range m.reports {
+		var filtered []analyzer.ReportItem
+		for _, item := range items {
+			if !pathSet[item.Path] {
+				filtered = append(filtered, item)
+			}
+		}
+		m.reports[name] = filtered
+	}
+	// Rebuild sidebar and table
+	m.sidebarItems = m.buildSidebarItems()
+	m.selected = nil
+	m.table = m.buildTable(m.sidebarCursor)
 }
 
 // handleSpaceDrillDown handles entering a directory in the space treemap.
@@ -519,12 +644,39 @@ func (m reportsModel) renderStatusBar() string {
 
 	sep := sepStyle.Render(" | ")
 
-	hints := []string{
-		keyStyle.Render("tab") + " " + descStyle.Render("Switch Pane"),
-		keyStyle.Render("enter") + " " + descStyle.Render("Select"),
-		keyStyle.Render("esc") + " " + descStyle.Render("Back"),
-		keyStyle.Render("s") + " " + descStyle.Render("Sort"),
-		keyStyle.Render("?") + " " + descStyle.Render("Help"),
+	var hints []string
+	if m.activePane == 1 {
+		hints = []string{
+			keyStyle.Render("d") + " " + descStyle.Render("Delete"),
+			keyStyle.Render("m") + " " + descStyle.Render("Trash"),
+			keyStyle.Render("space") + " " + descStyle.Render("Select"),
+		}
+		if len(m.selected) > 0 {
+			hints = append(hints, keyStyle.Render("D")+descStyle.Render(fmt.Sprintf(" Bulk Del (%d)", len(m.selected))))
+		}
+		hints = append(hints,
+			keyStyle.Render("s")+descStyle.Render(" Sort"),
+			keyStyle.Render("?")+descStyle.Render(" Help"),
+		)
+	} else {
+		hints = []string{
+			keyStyle.Render("tab") + " " + descStyle.Render("Switch Pane"),
+			keyStyle.Render("enter") + " " + descStyle.Render("Select"),
+			keyStyle.Render("esc") + " " + descStyle.Render("Back"),
+			keyStyle.Render("?") + " " + descStyle.Render("Help"),
+		}
+	}
+
+	// Flash message overrides the status bar temporarily
+	if m.flashMsg != "" {
+		flashStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(theme.SuccessColor)).
+			Bold(true)
+		bar := theme.StatusBarStyle.Copy().
+			Width(m.width).
+			Align(lipgloss.Center).
+			Render(flashStyle.Render(m.flashMsg))
+		return bar
 	}
 
 	bar := theme.StatusBarStyle.Copy().

@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/nick/mac-cleanup-explorer/internal/analyzer"
 	"github.com/nick/mac-cleanup-explorer/internal/scanner"
+	"github.com/nick/mac-cleanup-explorer/internal/theme"
 )
 
 type viewState int
@@ -49,6 +53,12 @@ type App struct {
 	detailModel    detailModel
 	exportModel    exportModel
 	executorModel  executorModel
+
+	// Overlays
+	showHelp     bool
+	helpModel    helpModel
+	showConfirm  bool
+	confirmModel confirmModel
 }
 
 // NewApp creates a new App model configured to scan the given path.
@@ -85,6 +95,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
+		a.helpModel.width = msg.Width
+		a.helpModel.height = msg.Height
+		a.confirmModel.width = msg.Width
 		// Forward resize to active sub-model
 		switch a.currentView {
 		case viewDashboard:
@@ -109,14 +122,37 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
+		// If confirmation dialog is active, route to it
+		if a.showConfirm {
+			var cmd tea.Cmd
+			a.confirmModel, cmd = a.confirmModel.Update(msg)
+			if a.confirmModel.cancelled {
+				a.showConfirm = false
+				return a, nil
+			}
+			if a.confirmModel.confirmed {
+				a.showConfirm = false
+				return a, cmd
+			}
+			return a, cmd
+		}
+
+		// If help overlay is active, only ? and esc are active
+		if a.showHelp {
+			var cmd tea.Cmd
+			a.helpModel, cmd = a.helpModel.Update(msg)
+			return a, cmd
+		}
+
 		switch msg.String() {
 		case "ctrl+c":
 			return a, tea.Quit
+		case "?":
+			a.showHelp = true
+			a.helpModel = newHelpModel(a.width, a.height)
+			return a, nil
 		case "q":
-			if a.currentView == viewScanning {
-				return a, tea.Quit
-			}
-			if a.currentView == viewDashboard {
+			if a.currentView == viewScanning || a.currentView == viewDashboard {
 				return a, tea.Quit
 			}
 		case "enter":
@@ -143,6 +179,69 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 		}
+
+	case toggleHelpMsg:
+		a.showHelp = !a.showHelp
+		if a.showHelp {
+			a.helpModel = newHelpModel(a.width, a.height)
+		}
+		return a, nil
+
+	case deleteItemMsg:
+		a.showConfirm = true
+		a.confirmModel = newDeleteConfirm(msg.path, msg.size, a.width)
+		return a, nil
+
+	case trashItemMsg:
+		a.showConfirm = true
+		a.confirmModel = newTrashConfirm(msg.path, msg.size, a.width)
+		return a, nil
+
+	case bulkDeleteMsg:
+		a.showConfirm = true
+		a.confirmModel = newBulkDeleteConfirm(msg.paths, msg.sizes, msg.total, a.width)
+		return a, nil
+
+	case itemDeletedMsg:
+		if msg.success {
+			actionStr := "Deleted"
+			if msg.action == "trash" {
+				actionStr = "Moved to Trash"
+			}
+			flash := fmt.Sprintf("%s: %s (freed %s)", actionStr, msg.path, theme.FormatSize(msg.freed))
+
+			// Remove from reports model
+			a.reportsModel.removeReportItem(msg.path)
+			// Also update the app-level reports reference
+			a.reports = a.reportsModel.reports
+
+			// If in detail view, navigate back to reports
+			if a.currentView == viewDetail {
+				a.currentView = viewReports
+				a.reportsModel.flashMsg = flash
+				a.reportsModel.flashTimer = 30
+				return a, flashTickCmd()
+			}
+			a.reportsModel.flashMsg = flash
+			a.reportsModel.flashTimer = 30
+			return a, flashTickCmd()
+		}
+		// Error case
+		errFlash := fmt.Sprintf("Error: %s", msg.err)
+		a.reportsModel.flashMsg = errFlash
+		a.reportsModel.flashTimer = 30
+		return a, flashTickCmd()
+
+	case bulkDeletedMsg:
+		flash := fmt.Sprintf("Bulk delete: %d deleted, %d failed (freed %s)",
+			msg.deleted, msg.failed, theme.FormatSize(msg.freed))
+		// Remove deleted items from the reports model
+		// The confirm model already deleted them from disk
+		a.reportsModel.flashMsg = flash
+		a.reportsModel.flashTimer = 30
+		// Re-sync the reports
+		a.reports = a.reportsModel.reports
+		return a, flashTickCmd()
 
 	case scanCompleteMsg:
 		a.scanResult = msg.result
@@ -216,20 +315,49 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) View() string {
+	var base string
 	switch a.currentView {
 	case viewScanning:
-		return a.scanModel.View()
+		base = a.scanModel.View()
 	case viewDashboard:
-		return a.dashboardModel.View()
+		base = a.dashboardModel.View()
 	case viewReports:
-		return a.reportsModel.View()
+		base = a.reportsModel.View()
 	case viewDetail:
-		return a.detailModel.View()
+		base = a.detailModel.View()
 	case viewExport:
-		return a.exportModel.View()
+		base = a.exportModel.View()
 	case viewExecutor:
-		return a.executorModel.View()
+		base = a.executorModel.View()
 	default:
-		return "Loading..."
+		base = "Loading..."
 	}
+
+	// Render confirmation dialog as centered overlay
+	if a.showConfirm {
+		overlay := a.confirmModel.View()
+		base = overlayCenter(a.width, a.height, base, overlay)
+	}
+
+	// Render help overlay on top of everything
+	if a.showHelp {
+		overlay := a.helpModel.View()
+		base = overlayCenter(a.width, a.height, base, overlay)
+	}
+
+	return base
+}
+
+// overlayCenter places an overlay panel centered on top of a background view.
+func overlayCenter(width, height int, background, overlay string) string {
+	if width <= 0 || height <= 0 {
+		return overlay
+	}
+	return lipgloss.Place(
+		width, height,
+		lipgloss.Center, lipgloss.Center,
+		overlay,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(lipgloss.Color(theme.BgColor)),
+	)
 }
