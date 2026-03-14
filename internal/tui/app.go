@@ -30,6 +30,7 @@ type reportsReadyMsg struct {
 // App is the top-level Bubble Tea model that routes to sub-views.
 type App struct {
 	currentView   viewState
+	previousView  viewState // for returning from overlay views
 	scanPath      string
 	width, height int
 
@@ -45,6 +46,8 @@ type App struct {
 	scanModel      scanModel
 	dashboardModel dashboardModel
 	reportsModel   reportsModel
+	detailModel    detailModel
+	exportModel    exportModel
 }
 
 // NewApp creates a new App model configured to scan the given path.
@@ -82,13 +85,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		// Forward resize to active sub-model
-		if a.currentView == viewDashboard {
+		switch a.currentView {
+		case viewDashboard:
 			a.dashboardModel.width = msg.Width
 			a.dashboardModel.height = msg.Height
-		}
-		if a.currentView == viewReports {
+		case viewReports:
 			var cmd tea.Cmd
 			a.reportsModel, cmd = a.reportsModel.Update(msg)
+			return a, cmd
+		case viewDetail:
+			var cmd tea.Cmd
+			a.detailModel, cmd = a.detailModel.Update(msg)
+			return a, cmd
+		case viewExport:
+			var cmd tea.Cmd
+			a.exportModel, cmd = a.exportModel.Update(msg)
 			return a, cmd
 		}
 
@@ -110,9 +121,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 		case "e":
-			if a.currentView == viewDashboard {
-				// Transition to export view (placeholder for now)
+			if a.currentView == viewDashboard || a.currentView == viewReports {
+				a.previousView = a.currentView
 				a.currentView = viewExport
+				a.exportModel = newExportModel(
+					a.reports, a.reportList, a.scanResult,
+					a.scanPath, a.width, a.height, a.previousView,
+				)
 				return a, nil
 			}
 		}
@@ -131,14 +146,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dashboardModel.reports = msg.reports
 
 	case navigateBackMsg:
-		if a.currentView == viewReports {
+		switch a.currentView {
+		case viewReports:
 			a.currentView = viewDashboard
+			return a, nil
+		case viewDetail:
+			a.currentView = viewReports
+			return a, nil
+		case viewExport:
+			a.currentView = a.exportModel.previousView
 			return a, nil
 		}
 
 	case navigateToDetailMsg:
-		// Placeholder: could transition to viewDetail in the future
-		_ = msg.item
+		// Determine the report name from the currently selected sidebar item
+		reportName := ""
+		if a.reportsModel.sidebarCursor < len(a.reportsModel.reportList) {
+			reportName = a.reportsModel.reportList[a.reportsModel.sidebarCursor].Description()
+		}
+		a.currentView = viewDetail
+		a.detailModel = newDetailModel(msg.item, reportName, a.width, a.height)
+		return a, nil
 	}
 
 	// Route to current view's update
@@ -155,6 +183,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.reportsModel, cmd = a.reportsModel.Update(msg)
 		return a, cmd
+	case viewDetail:
+		var cmd tea.Cmd
+		a.detailModel, cmd = a.detailModel.Update(msg)
+		return a, cmd
+	case viewExport:
+		var cmd tea.Cmd
+		a.exportModel, cmd = a.exportModel.Update(msg)
+		return a, cmd
 	}
 
 	return a, nil
@@ -168,8 +204,10 @@ func (a *App) View() string {
 		return a.dashboardModel.View()
 	case viewReports:
 		return a.reportsModel.View()
+	case viewDetail:
+		return a.detailModel.View()
 	case viewExport:
-		return "Export view (coming soon)...\n\nPress q to quit"
+		return a.exportModel.View()
 	default:
 		return "Loading..."
 	}
