@@ -431,6 +431,7 @@ func (m dashboardModel) renderNavHint(fullWidth int) string {
 	hint := strings.Join([]string{
 		keyStyle.Render("enter") + " " + descStyle.Render("Browse Reports"),
 		keyStyle.Render("e") + " " + descStyle.Render("Export"),
+		keyStyle.Render("x") + " " + descStyle.Render("Execute"),
 		keyStyle.Render("q") + " " + descStyle.Render("Quit"),
 		keyStyle.Render("?") + " " + descStyle.Render("Help"),
 	}, sep)

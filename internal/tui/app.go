@@ -48,6 +48,7 @@ type App struct {
 	reportsModel   reportsModel
 	detailModel    detailModel
 	exportModel    exportModel
+	executorModel  executorModel
 }
 
 // NewApp creates a new App model configured to scan the given path.
@@ -101,6 +102,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			a.exportModel, cmd = a.exportModel.Update(msg)
 			return a, cmd
+		case viewExecutor:
+			var cmd tea.Cmd
+			a.executorModel, cmd = a.executorModel.Update(msg)
+			return a, cmd
 		}
 
 	case tea.KeyMsg:
@@ -130,6 +135,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				)
 				return a, nil
 			}
+		case "x":
+			if a.currentView == viewDashboard || a.currentView == viewReports {
+				a.previousView = a.currentView
+				a.currentView = viewExecutor
+				a.executorModel = newExecutorModel(a.width, a.height)
+				return a, nil
+			}
 		}
 
 	case scanCompleteMsg:
@@ -155,6 +167,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		case viewExport:
 			a.currentView = a.exportModel.previousView
+			return a, nil
+		case viewExecutor:
+			a.currentView = a.previousView
 			return a, nil
 		}
 
@@ -191,6 +206,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.exportModel, cmd = a.exportModel.Update(msg)
 		return a, cmd
+	case viewExecutor:
+		var cmd tea.Cmd
+		a.executorModel, cmd = a.executorModel.Update(msg)
+		return a, cmd
 	}
 
 	return a, nil
@@ -208,6 +227,8 @@ func (a *App) View() string {
 		return a.detailModel.View()
 	case viewExport:
 		return a.exportModel.View()
+	case viewExecutor:
+		return a.executorModel.View()
 	default:
 		return "Loading..."
 	}
