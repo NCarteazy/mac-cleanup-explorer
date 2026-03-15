@@ -44,6 +44,14 @@ func Scan(root string, progress *ScanProgress) (*ScanResult, error) {
 			return nil
 		}
 
+		// Skip known problematic paths (Docker VM images, system firmlinks, etc.)
+		if ShouldSkip(path) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
 		info, err := d.Info()
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", path, err))
@@ -135,9 +143,15 @@ func sortChildren(node *FileNode) {
 
 // SkipPaths returns paths that should be skipped during scanning.
 func SkipPaths() []string {
-	return []string{
+	home, _ := os.UserHomeDir()
+	paths := []string{
 		"/System/Volumes/Data",
 	}
+	if home != "" {
+		// Docker Desktop VM disk image — sparse file that reports 1TB+ apparent size
+		paths = append(paths, filepath.Join(home, "Library/Containers/com.docker.docker/Data/vms"))
+	}
+	return paths
 }
 
 // ShouldSkip checks if a path should be skipped.

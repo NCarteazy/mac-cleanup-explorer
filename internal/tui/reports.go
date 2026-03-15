@@ -110,36 +110,60 @@ func (m reportsModel) buildTable(sidebarIdx int) tableModel {
 	reportName := m.reportNameForIndex(sidebarIdx)
 	items := m.reports[reportName]
 
-	cols, rows := m.columnsAndRows(reportName, items)
+	// Calculate available table width for columns
+	sidebarWidth := m.sidebarWidth()
+	tableWidth := m.width - sidebarWidth - 8 // account for panel borders/padding/gap
+	if tableWidth < 40 {
+		tableWidth = 40
+	}
+
+	cols, rows := m.columnsAndRows(reportName, items, tableWidth)
 
 	tbl := newTableModel(cols, rows)
 
-	// Calculate available table height: total height minus breadcrumbs (1), status bar (1), borders (4)
+	// Calculate available table height
 	tableHeight := m.height - 6
 	if tableHeight < 5 {
 		tableHeight = 5
-	}
-	sidebarWidth := m.sidebarWidth()
-	tableWidth := m.width - sidebarWidth - 6 // account for panel borders/padding
-	if tableWidth < 40 {
-		tableWidth = 40
 	}
 	tbl.SetSize(tableWidth, tableHeight)
 
 	return tbl
 }
 
+// fixedColumnsWidth returns the total width of non-path columns plus gaps.
+// The Path column gets whatever width remains.
+func pathColumnWidth(availableWidth int, fixedWidths ...int) int {
+	const colGap = 2
+	used := 0
+	for _, w := range fixedWidths {
+		used += w
+	}
+	// Add gaps between all columns (including the path column)
+	numCols := len(fixedWidths) + 1 // +1 for path column
+	used += (numCols - 1) * colGap
+
+	pathW := availableWidth - used
+	if pathW < 20 {
+		pathW = 20
+	}
+	return pathW
+}
+
 // columnsAndRows returns the columns and row data for a given report type.
-func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportItem) ([]column, [][]string) {
+// availableWidth is the total width available for all columns.
+func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportItem, availableWidth int) ([]column, [][]string) {
 	switch reportName {
 	case "space":
-		return m.spaceColumnsAndRows(items)
+		return m.spaceColumnsAndRows(items, availableWidth)
 	case "large_files":
+		sizeW, modW, typeW := 10, 18, 16
+		pathW := pathColumnWidth(availableWidth, sizeW, modW, typeW)
 		cols := []column{
-			{Name: "Path", Width: 40, Align: lipgloss.Left},
-			{Name: "Size", Width: 12, Align: lipgloss.Right},
-			{Name: "Modified", Width: 18, Align: lipgloss.Left},
-			{Name: "Type", Width: 16, Align: lipgloss.Left},
+			{Name: "Path", Width: pathW, Align: lipgloss.Left},
+			{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+			{Name: "Modified", Width: modW, Align: lipgloss.Left},
+			{Name: "Type", Width: typeW, Align: lipgloss.Left},
 		}
 		rows := make([][]string, len(items))
 		for i, item := range items {
@@ -152,11 +176,13 @@ func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportI
 		}
 		return cols, rows
 	case "stale":
+		sizeW, accessW, catW := 10, 18, 16
+		pathW := pathColumnWidth(availableWidth, sizeW, accessW, catW)
 		cols := []column{
-			{Name: "Path", Width: 40, Align: lipgloss.Left},
-			{Name: "Size", Width: 12, Align: lipgloss.Right},
-			{Name: "Last Accessed", Width: 18, Align: lipgloss.Left},
-			{Name: "Category", Width: 18, Align: lipgloss.Left},
+			{Name: "Path", Width: pathW, Align: lipgloss.Left},
+			{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+			{Name: "Last Accessed", Width: accessW, Align: lipgloss.Left},
+			{Name: "Category", Width: catW, Align: lipgloss.Left},
 		}
 		rows := make([][]string, len(items))
 		for i, item := range items {
@@ -169,10 +195,12 @@ func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportI
 		}
 		return cols, rows
 	case "caches":
+		sizeW, catW := 10, 20
+		pathW := pathColumnWidth(availableWidth, sizeW, catW)
 		cols := []column{
-			{Name: "Path", Width: 44, Align: lipgloss.Left},
-			{Name: "Size", Width: 12, Align: lipgloss.Right},
-			{Name: "Category", Width: 22, Align: lipgloss.Left},
+			{Name: "Path", Width: pathW, Align: lipgloss.Left},
+			{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+			{Name: "Category", Width: catW, Align: lipgloss.Left},
 		}
 		rows := make([][]string, len(items))
 		for i, item := range items {
@@ -184,10 +212,12 @@ func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportI
 		}
 		return cols, rows
 	case "devbloat":
+		sizeW, typeW := 10, 20
+		pathW := pathColumnWidth(availableWidth, sizeW, typeW)
 		cols := []column{
-			{Name: "Path", Width: 44, Align: lipgloss.Left},
-			{Name: "Size", Width: 12, Align: lipgloss.Right},
-			{Name: "Type", Width: 22, Align: lipgloss.Left},
+			{Name: "Path", Width: pathW, Align: lipgloss.Left},
+			{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+			{Name: "Type", Width: typeW, Align: lipgloss.Left},
 		}
 		rows := make([][]string, len(items))
 		for i, item := range items {
@@ -199,10 +229,12 @@ func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportI
 		}
 		return cols, rows
 	case "leftovers":
+		sizeW, appW := 10, 20
+		pathW := pathColumnWidth(availableWidth, sizeW, appW)
 		cols := []column{
-			{Name: "Path", Width: 44, Align: lipgloss.Left},
-			{Name: "Size", Width: 12, Align: lipgloss.Right},
-			{Name: "App Name", Width: 22, Align: lipgloss.Left},
+			{Name: "Path", Width: pathW, Align: lipgloss.Left},
+			{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+			{Name: "App Name", Width: appW, Align: lipgloss.Left},
 		}
 		rows := make([][]string, len(items))
 		for i, item := range items {
@@ -214,10 +246,12 @@ func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportI
 		}
 		return cols, rows
 	case "duplicates":
+		sizeW, copiesW := 10, 24
+		pathW := pathColumnWidth(availableWidth, sizeW, copiesW)
 		cols := []column{
-			{Name: "Path", Width: 40, Align: lipgloss.Left},
-			{Name: "Size", Width: 12, Align: lipgloss.Right},
-			{Name: "Copies", Width: 26, Align: lipgloss.Left},
+			{Name: "Path", Width: pathW, Align: lipgloss.Left},
+			{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+			{Name: "Copies", Width: copiesW, Align: lipgloss.Left},
 		}
 		rows := make([][]string, len(items))
 		for i, item := range items {
@@ -229,11 +263,12 @@ func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportI
 		}
 		return cols, rows
 	default:
-		// Generic fallback
+		sizeW, catW := 10, 18
+		pathW := pathColumnWidth(availableWidth, sizeW, catW)
 		cols := []column{
-			{Name: "Path", Width: 50, Align: lipgloss.Left},
-			{Name: "Size", Width: 12, Align: lipgloss.Right},
-			{Name: "Category", Width: 20, Align: lipgloss.Left},
+			{Name: "Path", Width: pathW, Align: lipgloss.Left},
+			{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+			{Name: "Category", Width: catW, Align: lipgloss.Left},
 		}
 		rows := make([][]string, len(items))
 		for i, item := range items {
@@ -249,13 +284,15 @@ func (m reportsModel) columnsAndRows(reportName string, items []analyzer.ReportI
 
 // spaceColumnsAndRows returns columns/rows for the space treemap.
 // If currentNode is set (drill-down), it shows children of that node.
-func (m reportsModel) spaceColumnsAndRows(items []analyzer.ReportItem) ([]column, [][]string) {
+func (m reportsModel) spaceColumnsAndRows(items []analyzer.ReportItem, availableWidth int) ([]column, [][]string) {
+	sizeW, pctW, filesW, catW := 10, 7, 10, 16
+	nameW := pathColumnWidth(availableWidth, sizeW, pctW, filesW, catW)
 	cols := []column{
-		{Name: "Name", Width: 30, Align: lipgloss.Left},
-		{Name: "Size", Width: 12, Align: lipgloss.Right},
-		{Name: "%", Width: 8, Align: lipgloss.Right},
-		{Name: "Files", Width: 10, Align: lipgloss.Right},
-		{Name: "Category", Width: 18, Align: lipgloss.Left},
+		{Name: "Name", Width: nameW, Align: lipgloss.Left},
+		{Name: "Size", Width: sizeW, Align: lipgloss.Right},
+		{Name: "%", Width: pctW, Align: lipgloss.Right},
+		{Name: "Files", Width: filesW, Align: lipgloss.Right},
+		{Name: "Category", Width: catW, Align: lipgloss.Left},
 	}
 
 	if m.currentNode != nil {

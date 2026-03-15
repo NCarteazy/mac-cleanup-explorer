@@ -91,10 +91,14 @@ func (t tableModel) View() string {
 		return ""
 	}
 
+	// Column gap for visual separation
+	const colGap = 2
+	gap := strings.Repeat(" ", colGap)
+
 	var b strings.Builder
 
 	// Render header
-	headerCells := make([]string, len(t.columns))
+	headerParts := make([]string, len(t.columns))
 	for i, col := range t.columns {
 		name := col.Name
 		// Add sort indicator
@@ -105,12 +109,12 @@ func (t tableModel) View() string {
 				name += " ^"
 			}
 		}
-		headerCells[i] = theme.TableHeaderStyle.Copy().
+		headerParts[i] = theme.TableHeaderStyle.Copy().
 			Width(col.Width).
 			Align(col.Align).
 			Render(truncate(name, col.Width))
 	}
-	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, headerCells...))
+	b.WriteString(strings.Join(headerParts, gap))
 	b.WriteString("\n")
 
 	// Render visible rows
@@ -125,7 +129,7 @@ func (t tableModel) View() string {
 
 	for i := t.offset; i < end; i++ {
 		row := t.rows[i]
-		cells := make([]string, len(t.columns))
+		cellParts := make([]string, len(t.columns))
 		for j, col := range t.columns {
 			val := ""
 			if j < len(row) {
@@ -145,9 +149,9 @@ func (t tableModel) View() string {
 					Align(col.Align)
 			}
 
-			cells[j] = cellStyle.Render(truncate(val, col.Width))
+			cellParts[j] = cellStyle.Render(truncate(val, col.Width))
 		}
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, cells...))
+		b.WriteString(strings.Join(cellParts, gap))
 		if i < end-1 {
 			b.WriteString("\n")
 		}
